@@ -1,0 +1,435 @@
+---
+output: html_document
+---
+
+## NBA Playoff Prediction
+
+## File: function.Rmd
+
+This file contains all the functions used in main.ipynb file.
+
+### Function 1 get_team_data(df, teamid, season)
+
+-   This function returns a list with the team corresponding regular season stats with given teamid and season.
+-   The returned list should contain the value of team, teamid, season, win_per, total_games, points, sd_points, rebs, fg_per, fg3_per, efg_per, ortg, opp_points, sd_opp_points, opp_rebs, opp_reb_per, opp_fg_per, opp_fg3_per, opp_efg_per, drtg, net_rtg in order.
+
+```{r}
+get_team_data <- function(df, teamid, season) {
+  
+  result <- list()
+  off_df <- df[df$season == season & df$off_teamid == teamid, ]
+  def_df <- df[df$season == season & df$def_teamid == teamid, ]
+  
+  # get team
+  team <- off_df$off_team[1]
+
+  # get win_per and number of total games
+  total_games <- dim(off_df)[1]
+  win <- sum(off_df$off_win)
+  win_per <- round(win / total_games, 3)
+  
+  # use help function to get team data and opponent data
+  lst1 <- team_data_func(off_df, 0)
+  lst2 <- team_data_func(def_df, 1)
+  
+  result$team <- team
+  result$teamid <- teamid
+  result$season <- season
+  result$win_per <- win_per
+  result$total_games <- total_games
+  result <- c(result, lst1, lst2)
+  
+  # get net_rtg
+  result$net_rtg <- result$ortg - result$drtg
+  
+  return (result)
+}
+```
+
+### Help function team_data_func(df, opp)
+
+-   This function returns a list with the value of points, sd_points, rebs, fg_per, fg3_per, efg_per, ortg or drtg in order.
+-   The variable opp represents whether this dataframe is opponents' or not.
+-   Recognize the all the off_team as one team.
+
+```{r}
+team_data_func <- function(df, opp) {
+  
+  result_lst <- list()
+  total_games <- dim(df)[1]
+  
+  # get points and sd_points
+  points <- sum(df$points) / total_games
+  points <- round(points, 1)
+  sd_points <- sd(df$points)
+  sd_points <- round(sd_points, 1)
+  
+  # get rebs
+  total_rebs <- sum(df$offreb + df$defreb)
+  rebs <- round(total_rebs / total_games, 1)
+  
+  # get fg_per, fg3_per, and efg_per
+  fg_per <- sum(df$fgmade) / sum(df$fgattempted)
+  fg_per <- round(fg_per, 3)
+  fg3_per <- sum(df$fg3made) / sum(df$fg3attempted)
+  fg3_per <- round(fg3_per, 3)
+  efg_per <- (sum(df$fgmade) + 0.5 * sum(df$fg3made)) / sum(df$fgattempted)
+  efg_per <- round(efg_per, 3)
+  
+  # get ortg, drtg, and net_rtg
+  ortg <- sum(df$points) / (sum(df$possessions) / 100)
+  ortg <- round(ortg, 1)
+  
+  if (opp == 0) {
+    result_lst$points <- points
+    result_lst$sd_points <- sd_points
+    result_lst$rebs <- rebs
+    result_lst$fg_per <- fg_per
+    result_lst$fg3_per <- fg3_per
+    result_lst$efg_per <- efg_per
+    result_lst$ortg <- ortg
+  } else {
+    result_lst$opp_points <- points
+    result_lst$opp_sd_points <- sd_points
+    result_lst$opp_rebs <- rebs
+    result_lst$opp_fg_per <- fg_per
+    result_lst$opp_fg3_per <- fg3_per
+    result_lst$opp_efg_per <- efg_per
+    result_lst$drtg <- ortg
+  }
+  
+  return (result_lst)
+}
+```
+
+### Function 2 standardize_team_data(df, teamid, season)
+
+-   This function returns a list with standardized team_data with given teamid and season.
+
+```{r}
+standardize_team_data <- function(df, teamid, season) {
+  
+  team_df <- df[df$season == season & df$teamid == teamid, ]
+  season_df <- df[df$season == season, ]
+  old_row <- as.list(team_df[1, ])
+  new_row <- list()
+  
+  # use help function to get season average value
+  avg_lst <- get_season_avg(season_df)
+  
+  # use help function to get standardized value
+  sd_value <- standardize_value(avg_lst, old_row[4: ncol(df)])
+  
+  new_row$team <- old_row$team
+  new_row$teamid <- old_row$teamid
+  new_row$season <- old_row$season
+  new_row <- append(new_row, sd_value)
+  new_row$total_games <- old_row$total_games
+  new_row$net_rtg <- old_row$net_rtg + 100
+  
+  return (new_row)
+}
+```
+
+### Help function get_season_avg(df)
+
+-   This function returns a list with season average value of the variable.
+
+```{r}
+get_season_avg <- function(df) {
+  
+  features <- colnames(df)[4: ncol(df)]
+  avg_lst <- list()
+  
+  for (f in features) {
+    col <- as.list(df[, f])
+    col <- unlist(col)
+    col <- col[1: 30]
+    avg_lst[f] <- mean(col)
+  }
+  
+  return (avg_lst)
+}
+```
+
+### Help function standardize_value(avg_lst, lst)
+
+-   This function standardized all the values in lst based on the given avg_lst
+
+```{r}
+standardize_value <- function(avg_lst, lst) {
+  
+  sd_lst <- list()
+  avg_lst <- unlist(avg_lst)
+  lst <- unlist(lst)
+  
+  for (i in 1: length(avg_lst)) {
+    sd_value <- round(lst[i] / avg_lst[i] * 100, 1)
+    sd_lst <- append(sd_lst, sd_value)
+  }
+  
+  return (sd_lst)
+}
+```
+
+### Function 3 get_round_series(gameid)
+
+-   This function returns the value of round and series of the given gameid as a vector.
+-   The sixth digit is round and the seventh digit is series.
+
+```{r}
+get_round_series <- function(gameid) {
+  
+  gameid <- as.character(gameid)
+  round <- as.integer(substr(gameid, 6, 6))
+  series <- as.integer(substr(gameid, 7, 7))
+  
+  return (c(round, series))
+}
+```
+
+### Function 4 get_team1_team2(season, round, series)
+
+-   This function returns a list with team1, team1id, team2, team2id, and season in order.
+
+```{r}
+get_team1_team2 <- function(df, season, round, series) {
+  
+  df <- df[df$season == season & df$round == round & df$series == series, ]
+  
+  team1id <- df$off_teamid[1]
+  team1 <- df$off_team[1]
+  team2id <- df$def_teamid[1]
+  team2 <- df$def_team[1]
+  
+  result_lst <- list(team1 = team1, team1id = team1id, team2 = team2, team2id = team2id, season = season)
+  
+  return (result_lst)
+}
+```
+
+### Function 5 get_series_data(df, season, team1id, team2id)
+
+-   This function returns the two teams data with given season, team1id, and team2id.
+-   The value should contain the value of win_per, points, sd_points, rebs, fg_per, fg3_per, efg_per, ortg, opp_points, sd_opp_points, opp_rebs, opp_fg_per, opp_fg3_per, opp_efg_per, drtg, net_rtg in order.
+
+```{r}
+get_series_data <- function(df, season, team1id, team2id) {
+  
+  team1_df <- df[df$season == season & df$teamid == team1id, ]
+  team2_df <- df[df$season == season & df$teamid == team2id, ]
+  team1_data <- as.list(team1_df[1, 4: ncol(team1_df)])
+  team2_data <- as.list(team2_df[1, 4: ncol(team2_df)])
+  team1_data <- unlist(team1_data)
+  team2_data <- unlist(team2_data)
+  result_lst <- round(team1_data - team2_data, 1)
+  
+  return (result_lst)
+}
+```
+
+### Function 6 get_series_result(df, season, team1id, team2id)
+
+-   This function returns the series result with given season and teams
+
+```{r}
+get_series_result <- function(df, season, team1id, team2id) {
+  
+  df <- df[df$gametype == 4 & df$off_teamid == team1id & df$def_teamid == team2id & df$season == season, ]
+  win1 <- sum(df$off_win)
+  win2 <- sum(df$def_win)
+  
+  return (win1 - win2)
+}
+```
+
+### Function 7 get_h2h(df, season, team1id, team2id)
+
+-   This function returns the regular season head to head result between given two teams.
+
+```{r}
+get_h2h <- function(df, season, team1id, team2id) {
+  
+  df <- df[df$gametype == 2 & df$season == season & df$off_teamid == team1id & df$def_teamid == team2id, ]
+  win1 <- sum(df$off_win)
+  win2 <- sum(df$def_win)
+  
+  return (win1 - win2)
+}
+```
+
+### Function 8 get_2023_series(df, team1, team2)
+
+-   This function returns a list with given series teams
+
+```{r}
+get_2023_series <- function(df, team1, team2) {
+  
+  result_lst <- c()
+  season <- 2023
+  
+  # use help function to get teamid
+  team1id <- get_teamid(team_data, team1)
+  team2id <- get_teamid(team_data, team2)
+  
+  # use function get_series_data to get data
+  series_data <- get_series_data(df, season, team1id, team2id)
+  
+  result_lst <- c(team1, team1id, team2, team2id, season, series_data)
+  
+  return (result_lst)
+}
+```
+
+### Help function get_teamid(df, team)
+
+-   This function returns the given team's teamid
+
+```{r}
+get_teamid <- function(df, team) {
+  
+  df <- df[df$off_team == team, ]
+  teamid <- df$off_teamid[1]
+  
+  return (teamid)
+}
+```
+
+### Function 9 get_best_ntree(formula, traindata, mtry)
+
+-   This function will plot an error - number of trees graph
+
+```{r}
+get_best_ntree <- function(formula, traindata) {
+  
+  model <- randomForest(formula, data = traindata, ntree = 1000)
+  plot(model, main = "ERROR & TREES")
+}
+```
+
+### Function 10 get_importance(formula, traindata, mtry, ntree)
+
+-   This function will plot the variables importance graph
+
+```{r}
+get_importance <- function(formula, traindata, mtry, ntree) {
+  
+  model <- randomForest(formula, data = traindata, mtry = mtry, ntree = ntree, importance = T)
+  varImpPlot(model, main = "Variable Importance Plot")
+}
+```
+
+### Function 11 get_rf(formula, data, mtry, ntree)
+
+-   This function will return the random forest model
+
+```{r}
+get_rf <- function(formula, data, mtry, ntree) {
+  
+  rf <- randomForest(formula, data = data, mtry = mtry, ntree = ntree, proximity = TRUE)
+  
+  return (rf)
+}
+```
+
+### Function 12 get_pred_result(formula, data, ntree, features, pred_data)
+
+-   This function will return the predicted result without approximation
+
+```{r}
+get_pred_result <- function(formula, data, ntree, features, pred_data) {
+  
+  mtry <- get_best_mtry(formula, data, features)
+  rf <- get_rf(formula, data, mtry, ntree)
+  pred <- predict(rf, pred_data)
+  
+  return (pred)
+}
+```
+
+### Help function get_best_mtry(formula, traindata)
+
+-   This function returns the mtry with lowest MSE
+
+```{r}
+get_best_mtry <- function(formula, traindata, features) {
+  
+  n <- length(features)
+  errRate <- c()
+  
+  for (i in 1: n) {
+    model <- randomForest(formula, data = traindata, ntree = 1000, p = 0.8, mtry = i)
+    errRate[i] <- mean(model$mse)
+  }
+  best_mtry <- which.min(errRate)
+  
+  return (best_mtry)
+}
+```
+
+### Function 13 optimize_result(pred_result)
+
+-   This function returns a list with optimized value with given pred_result
+
+```{r}
+optimize_result <- function(pred_result) {
+  
+  pred_result <- 1.5 * pred_result
+  result_lst <- c()
+  
+  for (i in 1: length(pred_result)) {
+    num <- pred_result[i]
+    if (num <= 0 & num >= -1) {
+      num <- -1
+    }
+    if (num <= 1 & num > 0) {
+      num <- 1
+    }
+    if (num >= 4) {
+      num <- 4
+    }
+    if (num <= -4) {
+      num <- -4
+    }
+    num <- round(num, 0)
+    result_lst[i] <- num
+  }
+  
+  return (result_lst)
+}
+```
+
+### Function 14 print_result(df, pred_result)
+
+-   This function has no returned value but will print out the given round predicted result
+
+```{r}
+print_result <- function(df, pred_result) {
+  
+  n <- length(pred_result)
+  team1_lst <- df$team1
+  team2_lst <- df$team2
+  
+  for (i in 1: n) {
+    str <- ""
+    
+    team1 <- team1_lst[i]
+    team2 <- team2_lst[i]
+    result <- pred_result[i]
+    if (result < 0) {
+      win1 <- 4 + result
+      win2 <- 4
+    } else {
+      win1 <- 4
+      win2 <- 4 - result
+    }
+    
+    str1 <- paste(team1, win1)
+    str2 <- paste(win2, team2)
+    str <- paste(str1, str2, sep = "-")
+    
+    print(str)
+  }
+}
+```
+

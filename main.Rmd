@@ -1,0 +1,367 @@
+---
+output: html_document
+---
+
+## NBA Playoff Prediction
+
+## File: main.rmd
+
+This file is used for data cleaning and model building to predict the NBA 2023-2024 playoff result from round1 to final.
+
+```{r}
+# import packages
+install.packages("randomForest")
+library(randomForest)
+```
+
+```{r}
+# Import functions from function.Rmd
+knitr::read_chunk("function.Rmd")
+```
+
+## Part 1. Data Cleaning
+
+### Part 1.1 Import dataset
+
+-   Import team_game_data.csv as team_data.
+
+```{r}
+team_data <- read.csv("data/team_game_data.csv")
+```
+
+### Part 1.2 Create new dataframe team_regular_data
+
+-   This dataframe contains each team's regular season data.
+-   This dataframe features contain team, teamid, season, win_per, total_games, points, sd_points, rebs, fg_per, fg3_per, efg_per, ortg, opp_points, sd_opp_points, opp_rebs, opp_fg_per, opp_fg3_per, opp_efg_per, drtg, net_rtg.
+-   opp_feature means the team opponent's feature value.
+-   sd_points means the standard deviation of points.
+-   Use function get_team_data(df, teamid, season)
+
+```{r}
+team_regular_data <- data.frame(team = character(0), teamid = numeric(0), season = numeric(0), win_per = numeric(0), total_games = numeric(0), points = numeric(0), sd_points = numeric(0), rebs = numeric(0), fg_per = numeric(0), fg3_per = numeric(0), efg_per = numeric(0), ortg = numeric(0), opp_points = numeric(0), sd_opp_points = numeric(0), opp_rebs = numeric(0), opp_fg_per = numeric(0), opp_fg3_per = numeric(0), opp_efg_per = numeric(0), drtg = numeric(0), net_rtg = numeric(0))
+
+teamid_lst <- unique(team_data$off_teamid)
+season_lst <- unique(team_data$season)
+df <- team_data[team_data$gametype == 2, ]
+
+
+index <- 1
+for (season in season_lst) {
+  for (teamid in teamid_lst) {
+    new_row <- get_team_data(df, teamid, season)
+    team_regular_data[index, ] <- new_row
+    index <- index + 1
+  }
+}
+
+head(team_regular_data)
+```
+
+### Part 1.3 Create new dataframe sd_team_regular_data
+
+-   This dataframe will contain the same columns as team_regular_data but with standardized values.
+-   The league season average value will be 100, and the team new value will be (the original value / league average value) \* 100
+-   For net_rtg, 0 is 100, then the standardized net_rtg will be 100 + original net_rtg value.
+-   Use function standardize_team_data(df, teamid, season)
+
+```{r}
+sd_team_regular_data <- team_regular_data
+
+for (i in 1: nrow(team_regular_data)) {
+  teamid <- sd_team_regular_data[i, ]$teamid
+  season <- sd_team_regular_data[i, ]$season
+  new_row <- standardize_team_data(team_regular_data, teamid, season)
+  sd_team_regular_data[i, ] <- new_row
+}
+
+head(sd_team_regular_data)
+```
+
+### Part 1.4 Create new dataframe playoff_series_data
+
+-   This dataframe contains all playoff series result and two teams' regular season data.
+-   This dataframe features include team1, team1id, team2, team2id, season, result, win_per, points, sd_points, rebs, fg_per, fg3_per, efg_per, ortg, opp_points, sd_opp_points, opp_rebs, opp_fg_per, opp_fg3_per, opp_efg_per, drtg, net_rtg, h2h.
+-   team1 and team2 coould be swapped.
+-   The feature result represents the result of the series, which is calculated by \# of team1 wins - \# of team2 wins. All the following features are the difference between team1 and team2, by team1 subtracting team2.
+-   h2h is two teas regular season face to face result. It is computed by \# of team1 wins - \# of team2 wins.
+
+```{r}
+playoff_series_data <- data.frame(team1 = character(0), team1id = numeric(0), team2 = character(0), team2id = character(0), season = numeric(0), result = numeric(0), win_per = numeric(0), total_games = numeric(0), points = numeric(0), sd_points = numeric(0), rebs = numeric(0), fg_per = numeric(0), fg3_per = numeric(0), efg_per = numeric(0), ortg = numeric(0), opp_points = numeric(0), sd_opp_points = numeric(0), opp_rebs = numeric(0), opp_fg_per = numeric(0), opp_fg3_per = numeric(0), opp_efg_per = numeric(0), drtg = numeric(0), net_rtg = numeric(0), h2h = numeric(0))
+
+# create dataframe only with playoff games
+df <- team_data[team_data$gametype == 4 & team_data$season >= 2014, ]
+
+# add two new columns round and series
+# use function get_round_series(gameid)
+df <- df[order(df$gameid), ]
+round_series <- lapply(df$gameid, get_round_series)
+round_lst <- list()
+series_lst <- list()
+for (i in 1: length(round_series)) {
+  round_lst <- append(round_lst, round_series[[i]][1])
+  series_lst <- append(series_lst, round_series[[i]][2])
+}
+
+df$round <- unlist(round_lst)
+df$series <- unlist(series_lst)
+
+# get team1 and team2 info
+# use function get_team1_team2(round, series)
+round_lst <- c(1, 2, 3, 4)
+series_lst <- c(8, 4, 2, 1)
+index <- 1
+for (season in unique(df$season)) {
+  for (i in 1: 4) {
+    round <- i
+    for (series in 0: series_lst[i] - 1) {
+      info <- get_team1_team2(df, season, round, series)
+      info <- append(info, replicate(19, 0))
+      playoff_series_data[index, ] <- unlist(info)
+      index <- index + 1
+    }
+  }
+}
+playoff_series_data <- playoff_series_data[complete.cases(playoff_series_data), ]
+rownames(playoff_series_data) <- NULL
+
+# complete the dataframe
+# the df should be sd_team_regular_data
+season_lst <- playoff_series_data$season
+team1id_lst <- playoff_series_data$team1id
+team2id_lst <- playoff_series_data$team2id
+
+for (i in 1: length(season_lst)) {
+  new_row <- get_series_data(sd_team_regular_data, season_lst[i], team1id_lst[i], team2id_lst[i])
+  series_result <- get_series_result(team_data, season_lst[i], team1id_lst[i], team2id_lst[i])
+  h2h <- get_h2h(team_data, season_lst[i], team1id_lst[i], team2id_lst[i])
+  new_row <- c(series_result, new_row, h2h)
+  playoff_series_data[i, 6: ncol(playoff_series_data)] <- new_row
+}
+
+playoff_series_data <- playoff_series_data[, !names(playoff_series_data) %in% c("total_games")]
+for (i in colnames(playoff_series_data)[6: ncol(playoff_series_data)]) {
+  playoff_series_data[, i] <- as.numeric(playoff_series_data[, i])
+}
+
+head(playoff_series_data)
+```
+
+## Part 2. Data Visulization
+
+### Part 2.1 points - series result graph
+
+```{r}
+plot(playoff_series_data$points, playoff_series_data$result, xlab = "points", ylab = "result", pch = 19, col = "lightblue")
+```
+
+### Part 2.2 sd_points - series result graph
+
+```{r}
+plot(playoff_series_data$sd_points, playoff_series_data$result, xlab = "sd_points", ylab = "result", pch = 19, col = "red")
+```
+
+### Part 2.3 opp_points - series result graph
+
+```{r}
+plot(playoff_series_data$opp_points, playoff_series_data$result, xlab = "opp_points", ylab = "result", pch = 19, col = "orange")
+```
+
+### Part 2.4 net_rtg - series result graph
+
+```{r}
+plot(playoff_series_data$net_rtg, playoff_series_data$result, xlab = "net_rtg", ylab = "result", pch = 19, col = "lightgreen")
+```
+
+### Part 2.5 efg - series result graph
+
+```{r}
+plot(playoff_series_data$efg_per, playoff_series_data$result, xlab = "efg", ylab = "result", pch = 19, col = "pink")
+```
+
+### Observation
+
+From the above graphs, it is clear that efg and net_rtg has the most apparently linear relationship with series result.
+
+## Part 3. Model Building
+
+### Part 3.1 Create dataframe round1_2023
+
+-   This dataframe should be similar to playoff_series_data. The only difference is there should be no result column in this dataframe.
+
+```{r}
+round1_2023 <- data.frame(team1 = character(0), team1id = numeric(0), team2 = character(0), team2id = character(0), season = numeric(0), win_per = numeric(0), total_games = numeric(0), points = numeric(0), sd_points = numeric(0), rebs = numeric(0), fg_per = numeric(0), fg3_per = numeric(0), efg_per = numeric(0), ortg = numeric(0), opp_points = numeric(0), sd_opp_points = numeric(0), opp_rebs = numeric(0), opp_fg_per = numeric(0), opp_fg3_per = numeric(0), opp_efg_per = numeric(0), drtg = numeric(0), net_rtg = numeric(0), h2h = numeric(0))
+
+team1_lst <- c("Boston Celtics", "New York Knicks", "Cleveland Cavaliers", "Milwaukee Bucks", "Oklahoma City Thunder", "Denver Nuggets", "Minnesota Timberwolves", "LA Clippers")
+team2_lst <- c("Miami Heat", "Philadelphia 76ers", "Orlando Magic", "Indiana Pacers", "New Orleans Pelicans", "Los Angeles Lakers", "Phoenix Suns", "Dallas Mavericks")
+season <- 2023
+
+# use get_2023_series(df, team1, team2) to complete the dataframe
+for (i in 1: 8) {
+  new_row <- get_2023_series(sd_team_regular_data, team1_lst[i], team2_lst[i])
+  h2h <- get_h2h(team_data, 2023, new_row[2], new_row[4])
+  new_row <- c(new_row, h2h)
+  round1_2023 [i, ] <- new_row
+}
+
+round1_2023 <- round1_2023[, !names(round1_2023) %in% c("total_games")]
+for (i in colnames(round1_2023)[6: ncol(round1_2023)]) {
+  round1_2023[, i] <- as.numeric(round1_2023[, i])
+}
+
+round1_2023
+```
+
+### Part 3.2 Build random forest model
+
+-   This part I will build the random forest model.
+
+```{r}
+features <- colnames(round1_2023)[6: ncol(round1_2023)]
+formula <- as.formula(paste0("result ~ ", paste(features, collapse = "+")))
+
+# plot the error - number of trees figure
+get_best_ntree(formula, playoff_series_data)
+```
+
+```{r}
+# plot the importance plot
+ntree <- 1000
+get_importance(formula, playoff_series_data, best_mtry, ntree)
+```
+
+### Part 3.3 Round1 prediction
+
+-   This part will predict round1 result and present teh predicted result.
+
+```{r}
+# build the model and predict the result
+pred_result <- rep(0, 8)
+
+for (i in 1: 10) {
+  pred_result <- get_pred_result(formula, playoff_series_data, ntree, features, round1_2023) + pred_result
+}
+
+pred_result <- pred_result / 10
+```
+
+```{r}
+# optimize the predicted result
+round1_result <- optimize_result(pred_result)
+
+round1_result
+```
+
+```{r}
+# present the round1 predicted result
+print_result(round1_2023, round1_result)
+```
+
+### Part 3.4 Round2 prediction
+
+-   This part is for predicting round2 result based on previous predicted result
+
+```{r}
+# create round2_2023 dataframe
+round2_2023 <- data.frame(team1 = character(0), team1id = numeric(0), team2 = character(0), team2id = character(0), season = numeric(0), win_per = numeric(0), total_games = numeric(0), points = numeric(0), sd_points = numeric(0), rebs = numeric(0), fg_per = numeric(0), fg3_per = numeric(0), efg_per = numeric(0), ortg = numeric(0), opp_points = numeric(0), sd_opp_points = numeric(0), opp_rebs = numeric(0), opp_fg_per = numeric(0), opp_fg3_per = numeric(0), opp_efg_per = numeric(0), drtg = numeric(0), net_rtg = numeric(0), h2h = numeric(0))
+team1_lst <- c("Boston Celtics", "New York Knicks", "Oklahoma City Thunder", "Denver Nuggets")
+team2_lst <- c("Cleveland Cavaliers", "Milwaukee Bucks", "LA Clippers", "Phoenix Suns")
+
+for (i in 1: 4) {
+  new_row <- get_2023_series(sd_team_regular_data, team1_lst[i], team2_lst[i])
+  h2h <- get_h2h(team_data, 2023, new_row[2], new_row[4])
+  new_row <- c(new_row, h2h)
+  round2_2023 [i, ] <- new_row
+}
+
+round2_2023 <- round2_2023[, !names(round2_2023) %in% c("total_games")]
+for (i in colnames(round2_2023)[6: ncol(round2_2023)]) {
+  round2_2023[, i] <- as.numeric(round2_2023[, i])
+}
+
+round2_2023
+```
+
+```{r}
+# predict and present round2 predicted result
+pred_result <- rep(0, 4)
+
+for (i in 1: 10) {
+  pred_result <- get_pred_result(formula, playoff_series_data, ntree, features, round2_2023) + pred_result
+}
+
+pred_result <- pred_result / 10
+round2_result <- optimize_result(pred_result)
+
+print_result(round2_2023, round2_result)
+```
+
+### Part 3.5 Round3 prediction
+
+- This part is for predicting round3 result
+
+```{r}
+# create round3_2023 dataframe
+round3_2023 <- data.frame(team1 = character(0), team1id = numeric(0), team2 = character(0), team2id = character(0), season = numeric(0), win_per = numeric(0), total_games = numeric(0), points = numeric(0), sd_points = numeric(0), rebs = numeric(0), fg_per = numeric(0), fg3_per = numeric(0), efg_per = numeric(0), ortg = numeric(0), opp_points = numeric(0), sd_opp_points = numeric(0), opp_rebs = numeric(0), opp_fg_per = numeric(0), opp_fg3_per = numeric(0), opp_efg_per = numeric(0), drtg = numeric(0), net_rtg = numeric(0), h2h = numeric(0))
+team1_lst <- c("Boston Celtics", "Oklahoma City Thunder")
+team2_lst <- c("Milwaukee Bucks", "Denver Nuggets")
+
+for (i in 1: 2) {
+  new_row <- get_2023_series(sd_team_regular_data, team1_lst[i], team2_lst[i])
+  h2h <- get_h2h(team_data, 2023, new_row[2], new_row[4])
+  new_row <- c(new_row, h2h)
+  round3_2023 [i, ] <- new_row
+}
+
+round3_2023 <- round3_2023[, !names(round3_2023) %in% c("total_games")]
+for (i in colnames(round3_2023)[6: ncol(round3_2023)]) {
+  round3_2023[, i] <- as.numeric(round3_2023[, i])
+}
+
+# predict and present result
+pred_result <- rep(0, 2)
+
+for (i in 1: 10) {
+  pred_result <- get_pred_result(formula, playoff_series_data, ntree, features, round3_2023) + pred_result
+}
+
+pred_result <- pred_result / 10
+round3_result <- optimize_result(pred_result)
+
+print_result(round3_2023, round3_result)
+```
+
+### Part 3.6 NBA Final prediction
+
+- This part is for prediction final result
+
+```{r}
+# create round4_2023 dataframe
+round4_2023 <- data.frame(team1 = character(0), team1id = numeric(0), team2 = character(0), team2id = character(0), season = numeric(0), win_per = numeric(0), total_games = numeric(0), points = numeric(0), sd_points = numeric(0), rebs = numeric(0), fg_per = numeric(0), fg3_per = numeric(0), efg_per = numeric(0), ortg = numeric(0), opp_points = numeric(0), sd_opp_points = numeric(0), opp_rebs = numeric(0), opp_fg_per = numeric(0), opp_fg3_per = numeric(0), opp_efg_per = numeric(0), drtg = numeric(0), net_rtg = numeric(0), h2h = numeric(0))
+team1_lst <- c("Boston Celtics")
+team2_lst <- c("Oklahoma City Thunder")
+
+for (i in 1: 1) {
+  new_row <- get_2023_series(sd_team_regular_data, team1_lst[i], team2_lst[i])
+  h2h <- get_h2h(team_data, 2023, new_row[2], new_row[4])
+  new_row <- c(new_row, h2h)
+  round4_2023 [i, ] <- new_row
+}
+
+round4_2023 <- round4_2023[, !names(round3_2023) %in% c("total_games")]
+for (i in colnames(round4_2023)[6: ncol(round4_2023)]) {
+  round4_2023[, i] <- as.numeric(round4_2023[, i])
+}
+
+# predict and present result
+pred_result <- rep(0, 1)
+
+for (i in 1: 10) {
+  pred_result <- get_pred_result(formula, playoff_series_data, ntree, features, round4_2023) + pred_result
+}
+
+pred_result <- pred_result / 10
+round4_result <- optimize_result(pred_result)
+
+print_result(round4_2023, round4_result)
+```
+

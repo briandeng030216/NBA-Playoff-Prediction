@@ -1,0 +1,51 @@
+# ---------------------------------------------------------
+# player_game_data.csv
+# 
+# This dataset has player game statistical counting stats.
+# Team information in this dataset represents team stats accumulated while the player was on the court.
+# There is one row per game that the player was rostered for covered seasons/gametypes.
+# ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# team_game_data.csv
+# 
+# This dataset has team game statistical counting stats.
+# Rows are all from the perspective of the offensive team. Defensive stats must be calculated by using a team's defensive row.
+# There is one row for each team's offensive stats, meaning two rows for each game (one for each team)
+# ---------------------------------------------------------
+
+### SEASONS ###
+
+Both player and team data cover the 2014-15 to 2023-24 regular seasons and. The 2004-05 to 2022-23 playoffs
+
+### player_game_data columns ###
+
+season: The starting season of an NBA calendar year. The 2023 season is the 2023-24 NBA season. This means that the 2024 playoffs took place during the 2023 season (i.e. 2023-24 season).
+
+gametype: An indicator for whether the game was from the regular season (gametype = 2) or playoffs (gametype = 4)
+
+missed: Did the player miss the game due to injury or suspension (missed = 1). A player who is available but does not play will have a value of 0 indicating that he was a DNP-CD. 
+
+seconds: The number of seconds the player played in the game
+
+offreb_chances: The number of opportunities the player had to grab an offensive rebound while on the court (for example, a teammate missed FGA). This is the appropriate denominator if you would like to calculate offensive rebound percentage (OREB%).
+
+defreb_chances: The number of opportunities the player had to grab a defensive rebound while on the court (for example, an opposing team missed FGA). This is the appropriate denominator if you would like to calculate defensive rebound percentage (DREB%).
+
+### team_game_data columns ###
+
+reb_chances: An opportunity for a rebound when the off_team was on offense and the def_team was on defense. This is the denominator for team REB% and includes both individual and team rebounds.
+
+### Advanced Variable Explanation ###
+
+EFG% = (fgmade + 0.5*fg3made)/fgattempted
+
+REB% = (offreb + defreb)/(offreb_chances + defreb_chances)
+
+ORTG = points/(possessions/100)
+
+DRTG = points allowed/(defensive possessions/100) [Same as ORTG calculation but for the defensive team]
+
+NET RTG = ORTG - DRTG
+
+
